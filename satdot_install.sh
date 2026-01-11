@@ -1,258 +1,202 @@
 #!/usr/bin/env bash
 set -e
 
-### ============================================================
-### SHADOWARCH – FULL AUTO-INSTALL + CONFIG SCRIPT
-### COMPETE WAYLAND/HYPERLAND + SECURITY + PERFORMANCE SYSTEM
-### ============================================================
+# ==============================================================================
+# 0. SAFETY CHECK & ENVIRONMENT
+# ==============================================================================
+if [ "$EUID" -ne 0 ]; then 
+  echo "ERROR: Please run with sudo."
+  exit 1
+fi
 
-USERNAME=${SUDO_USER:-$USER}
-HOME_DIR="/home/$USERNAME"
+REAL_USER=${SUDO_USER:-$USER}
+USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+CONFIG_DIR="$USER_HOME/.config"
 
-echo "[1/30] Updating system..."
+echo "
+==================================================
+   SHADOWARCH MASTER SETUP (VERSION 3.0)
+==================================================
+"
+
+# ==============================================================================
+# 1. SYSTEM OPTIMIZATION & CORE
+# ==============================================================================
+echo "[1/12] Optimizing pacman and system update..."
+sed -i 's/^#ParallelDownloads/ParallelDownloads/' /etc/pacman.conf
 pacman -Syu --noconfirm
 
-### ------------------------------------------------------------
-### CORE SYSTEM
-### ------------------------------------------------------------
-
-echo "[2/30] Installing core packages..."
+echo "[2/12] Installing core system packages..."
 pacman -S --noconfirm \
-    base-devel git wget curl neovim nano \
-    linux linux-headers linux-hardened \
-    networkmanager systemd-resolvconf \
-    ufw apparmor firejail \
-    zram-generator rsync zip unzip p7zip unrar \
-    ntfs-3g bash-completion logrotate \
-    mesa vulkan-intel intel-media-driver intel-gpu-tools \
-    fastfetch btop htop \
-    timeshift \
-    xdg-user-dirs xdg-utils
+    base-devel git wget curl jq chafa fastfetch \
+    networkmanager systemd-resolved dbus \
+    xdg-user-dirs xdg-utils polkit-gnome \
+    pipewire pipewire-pulse wireplumber alsa-utils \
+    ufw apparmor zram-generator tlp \
+    ttf-jetbrains-mono-nerd noto-fonts noto-fonts-cjk noto-fonts-emoji \
+    linux linux-headers qt5-wayland qt6-wayland sddm
 
-### Enable services
-echo "[3/30] Enabling services..."
-systemctl enable NetworkManager
-systemctl enable systemd-resolved
-systemctl enable apparmor
+# Enable Essential Services
+systemctl enable --now NetworkManager systemd-resolved apparmor tlp sddm
 systemctl enable ufw
-systemctl enable logrotate.timer
-
-### ------------------------------------------------------------
-### FIREWALL + SECURITY
-### ------------------------------------------------------------
-echo "[4/30] Configuring firewall..."
 ufw default deny incoming
 ufw default allow outgoing
 ufw --force enable
 
-echo "[5/30] Applying kernel hardening..."
-cat <<EOF >/etc/sysctl.d/99-shadowarch.conf
-kernel.kptr_restrict=2
-kernel.dmesg_restrict=1
-kernel.yama.ptrace_scope=2
-fs.protected_fifos=1
-fs.protected_hardlinks=1
-fs.protected_symlinks=1
+sudo -u "$REAL_USER" xdg-user-dirs-update
+
+# ==============================================================================
+# 2. AUR HELPER (PARU)
+# ==============================================================================
+echo "[3/12] Installing PARU (AUR helper)..."
+if ! sudo -u "$REAL_USER" command -v paru &>/dev/null; then
+    TMP=$(mktemp -d)
+    chown "$REAL_USER":"$REAL_USER" "$TMP"
+    sudo -u "$REAL_USER" bash <<EOF
+        cd "$TMP"
+        git clone https://aur.archlinux.org/paru-bin.git
+        cd paru-bin
+        makepkg -si --noconfirm
 EOF
-sysctl --system
+fi
 
-### ------------------------------------------------------------
-### PERFORMANCE
-### ------------------------------------------------------------
-
-echo "[6/30] Setting up ZRAM..."
-cat <<EOF >/etc/systemd/zram-generator.conf
-[zram0]
-zram-size = ram / 2
-EOF
-
-echo "[7/30] Installing TLP power management..."
-pacman -S --noconfirm tlp
-systemctl enable --now tlp
-
-### ------------------------------------------------------------
-### DNS OVER TLS
-### ------------------------------------------------------------
-
-echo "[8/30] Enabling DNS-over-TLS..."
-sed -i 's/#DNSOverTLS=.*/DNSOverTLS=yes/' /etc/systemd/resolved.conf
-
-### ------------------------------------------------------------
-### WAYLAND + HYPERLAND DESKTOP
-### ------------------------------------------------------------
-
-echo "[9/30] Installing Wayland/Hyperland..."
-pacman -S --noconfirm \
+# ==============================================================================
+# 3. HYPRLAND & VISUAL STACK
+# ==============================================================================
+echo "[4/12] Installing Hyprland stack & Themes..."
+sudo -u "$REAL_USER" paru -S --noconfirm \
     hyprland waybar hyprpaper \
-    wl-clipboard cliphist \
-    dunst \
-    grim slurp \
-    rofi-wayland \
-    thunar gvfs tumbler \
-    kitty \
+    wl-clipboard cliphist dunst grim slurp \
+    rofi-wayland thunar kitty \
     papirus-icon-theme bibata-cursor-theme \
-    xdg-desktop-portal-hyprland
+    xdg-desktop-portal xdg-desktop-portal-hyprland \
+    brave-bin catppuccin-gtk-theme-mocha
 
-### ------------------------------------------------------------
-### AUDIO SYSTEM
-### ------------------------------------------------------------
+# ==============================================================================
+# 4. CONFIGURATION & DIRECTORIES
+# ==============================================================================
+echo "[5/12] Setting up directories and wallpapers..."
+sudo -u "$REAL_USER" mkdir -p "$CONFIG_DIR"/{hypr/scripts,waybar,kitty,rofi,wallpapers/fullpack}
 
-echo "[10/30] Installing PipeWire..."
-pacman -S --noconfirm \
-    pipewire pipewire-pulse wireplumber pavucontrol
+WALLDIR="$CONFIG_DIR/wallpapers/fullpack"
+urls=(
+"https://raw.githubusercontent.com/sylveonlol/wallpapers/main/cyberpunk-anime/cyber-anime1.png"
+"https://raw.githubusercontent.com/sylveonlol/wallpapers/main/cyberpunk-anime/cyber-anime3.png"
+"https://raw.githubusercontent.com/catppuccin/wallpapers/main/simple/mocha-wave.png"
+)
 
-### ------------------------------------------------------------
-### DEVELOPER STACK (FULL)
-### ------------------------------------------------------------
+for url in "${urls[@]}"; do
+    sudo -u "$REAL_USER" wget -q "$url" -P "$WALLDIR" || true
+done
 
-echo "[11/30] Installing development languages..."
-pacman -S --noconfirm \
-    gcc g++ make cmake \
-    python python-pip \
-    nodejs npm \
-    rust go \
-    jdk17-openjdk \
-    git
+DEFAULT_WALL=$(ls "$WALLDIR" | head -n 1)
+EXT="${DEFAULT_WALL##*.}"
 
-### ------------------------------------------------------------
-### BROWSERS
-### ------------------------------------------------------------
+# ==============================================================================
+# 5. WRITING THEME & CONFIG FILES
+# ==============================================================================
+echo "[6/12] Configuring Terminal & Launcher..."
 
-echo "[12/30] Installing browsers..."
-pacman -S --noconfirm firefox brave-bin || true
+# Kitty Config
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/kitty/kitty.conf" >/dev/null <<EOF
+font_family      JetBrainsMono Nerd Font
+font_size        11.0
+window_padding_width 15
+background       #1e1e2e
+foreground       #cdd6f4
+EOF
 
-### ------------------------------------------------------------
-### VIRTUALIZATION (KVM + GPU ACCEL)
-### ------------------------------------------------------------
+# Rofi Config (Mocha Theme)
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/rofi/config.rasi" >/dev/null <<EOF
+configuration { modi: "drun"; show-icons: true; font: "JetBrainsMono Nerd Font 12"; }
+@theme "/dev/null"
+* { bg: #1e1e2e; fg: #cdd6f4; accent: #89dceb; }
+window { background-color: @bg; border: 2px; border-color: @accent; border-radius: 12px; width: 30%; }
+element selected { background-color: @accent; text-color: @bg; }
+EOF
 
-echo "[13/30] Installing KVM/QEMU virtualization..."
-pacman -S --noconfirm \
-    qemu-full virt-manager virt-viewer dnsmasq iptables-nft
-
-echo "kvm" >/etc/modules-load.d/kvm.conf
-echo "kvm-intel" >>/etc/modules-load.d/kvm.conf
-
-systemctl enable --now libvirtd
-usermod -aG libvirt "$USERNAME"
-
-### ------------------------------------------------------------
-### THEME & CONFIGS (HYDE)
-### ------------------------------------------------------------
-
-echo "[14/30] Creating config directories..."
-mkdir -p $HOME_DIR/.config/{hypr,waybar,rofi,kitty,wallpapers}
-
-### ---- Hyperland Config ----
-echo "[15/30] Installing Hyperland config..."
-cat <<'EOF' >$HOME_DIR/.config/hypr/hyprland.conf
+# Hyprland Config
+echo "[7/12] Configuring Hyprland..."
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/hypr/hyprland.conf" >/dev/null <<EOF
 monitor=,preferred,auto,1
-exec-once=waybar
-exec-once=dunst
-exec-once=hyprpaper
-exec-once=wl-paste -t text --watch cliphist store
+env = XCURSOR_SIZE,24
+env = QT_QPA_PLATFORM,wayland
+env = GDK_BACKEND,wayland,x11
 
-general {
-    gaps_in = 7
-    gaps_out = 15
-    border_size = 3
-    col.active_border = rgb(c6a0f6)
-    col.inactive_border = rgb(313244)
-    rounding = 10
-}
+exec-once = waybar
+exec-once = hyprpaper
+exec-once = /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
 
-decoration {
-    rounding = 10
-    blur { enabled = true; size = 8; passes = 2; }
-    drop_shadow = true
-    shadow_range = 20
-    shadow_render_power = 3
-}
+\$mod = SUPER
+bind = \$mod, RETURN, exec, kitty
+bind = \$mod, D, exec, rofi -show drun -theme $CONFIG_DIR/rofi/config.rasi
+bind = \$mod, Q, killactive
+bind = \$mod, F1, exec, $CONFIG_DIR/hypr/scripts/keybinds.sh
+bind = \$mod SHIFT, W, exec, $USER_HOME/shadow-wallpaper.sh \$(find $WALLDIR -type f | shuf -n 1)
 
-input { kb_layout = us }
-
-bind = SUPER, RETURN, exec, kitty
-bind = SUPER, E, exec, thunar
-bind = SUPER, D, exec, rofi -show drun
-bind = SUPER, Q, killactive
-bind = SUPER, F, togglefloating
-bind = SUPER SHIFT, R, exec, hyprctl reload
+$(for i in {1..9}; do echo "bind = \$mod, $i, workspace, $i"; done)
+bind = \$mod, 0, workspace, 10
 EOF
 
-### Wallpaper
-wget -O $HOME_DIR/.config/wallpapers/hyde.png \
-https://raw.githubusercontent.com/catppuccin/wallpapers/main/gradient-mocha.png
+# ==============================================================================
+# 6. SCRIPTS & MAINTENANCE
+# ==============================================================================
+echo "[8/12] Generating helper scripts..."
 
-cat <<EOF >$HOME_DIR/.config/hypr/hyprpaper.conf
-preload = $HOME_DIR/.config/wallpapers/hyde.png
-wallpaper = ,$HOME_DIR/.config/wallpapers/hyde.png
+# Keybinds script
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/hypr/scripts/keybinds.sh" >/dev/null <<'EOF'
+#!/usr/bin/env bash
+grep '^bind =' ~/.config/hypr/hyprland.conf | sed 's/bind = //g' | rofi -dmenu -i -p "Keys" -theme ~/.config/rofi/config.rasi
 EOF
 
-### ---- Waybar ----
-echo "[16/30] Installing Waybar..."
-cat <<'EOF' >$HOME_DIR/.config/waybar/config
-{
-  "layer": "top",
-  "modules-left": ["hyprland/workspaces"],
-  "modules-center": ["clock"],
-  "modules-right": ["cpu","memory","network","pulseaudio","battery"],
-  "clock": { "format": "{:%a %d %b  %H:%M}" }
-}
+# Wallpaper script
+sudo -u "$REAL_USER" tee "$USER_HOME/shadow-wallpaper.sh" >/dev/null <<EOF
+#!/usr/bin/env bash
+NEW_WALL=\$1
+hyprctl hyprpaper preload "\$NEW_WALL"
+hyprctl hyprpaper wallpaper ",\$NEW_WALL"
 EOF
 
-cat <<'EOF' >$HOME_DIR/.config/waybar/style.css
-* { font-family: "JetBrainsMono Nerd Font"; font-size: 12px; }
-window#waybar {
-    background: rgba(30,30,46,0.8);
-    border-bottom: 2px solid #89dceb;
-    color: #cdd6f4;
-}
-#workspaces button {
-    padding: 4px 6px; margin: 3px;
-    background: #313244; color: #89dceb;
-    border-radius: 8px;
-}
-#workspaces button.active {
-    background: #89dceb; color: #1e1e2e;
-}
-#cpu,#memory,#network,#pulseaudio,#battery,#clock {
-    padding: 5px 10px; margin-right: 6px;
-    background: #313244; border-radius: 8px;
-}
-EOF
+chmod +x "$CONFIG_DIR/hypr/scripts/keybinds.sh" "$USER_HOME/shadow-wallpaper.sh"
 
-### ---- Rofi ----
-echo "[17/30] Installing Rofi theme..."
-cat <<'EOF' >$HOME_DIR/.config/rofi/config.rasi
-configuration {
-  font: "JetBrainsMono Nerd Font 14";
-}
-@theme "catppuccin-mocha"
-EOF
+# ==============================================================================
+# 7. SDDM & SHELL POLISH
+# ==============================================================================
+echo "[9/12] Setting up SDDM Login Screen..."
+THEMEDIR="/usr/share/sddm/themes/ShadowArch"
+mkdir -p "$THEMEDIR"
+cp "$WALLDIR/$DEFAULT_WALL" "$THEMEDIR/background.$EXT"
+echo "[General]
+background=background.$EXT
+font=JetBrains Mono
+accentColor=#89dceb" > "$THEMEDIR/theme.conf"
 
-### ---- Kitty ----
-echo "[18/30] Installing Kitty config..."
-cat <<'EOF' >$HOME_DIR/.config/kitty/kitty.conf
-font_family JetBrains Mono
-font_size 12
-background #1e1e2e
-foreground #cdd6f4
-cursor     #89dceb
-selection_bg #313244
-EOF
+mkdir -p /etc/sddm.conf.d
+echo "[Theme]
+Current=ShadowArch" > /etc/sddm.conf.d/theme.conf
 
-### Permissions
-echo "[19/30] Fixing permissions..."
-chown -R $USERNAME:$USERNAME $HOME_DIR/.config
+# Bashrc Fetch
+if ! grep -q "fastfetch" "$USER_HOME/.bashrc"; then
+    echo "fastfetch --logo-type kitty --logo-width 28" >> "$USER_HOME/.bashrc"
+fi
 
-### ------------------------------------------------------------
-### FINAL SYSTEM CLEANUP
-### ------------------------------------------------------------
+# Hyprpaper startup file
+sudo -u "$REAL_USER" echo "preload = $WALLDIR/$DEFAULT_WALL
+wallpaper = ,$WALLDIR/$DEFAULT_WALL" > "$CONFIG_DIR/hypr/hyprpaper.conf"
 
-echo "[20/30] Enabling parallel downloads..."
-sed -i 's/^#ParallelDownloads/ParallelDownloads/' /etc/pacman.conf
+# ==============================================================================
+# 8. PERMISSIONS & FINISH
+# ==============================================================================
+echo "[10/12] Fixing ownership..."
+chown -R "$REAL_USER":"$REAL_USER" "$USER_HOME"
 
-echo "[21/30] Cleaning package cache..."
-pacman -Scc --noconfirm
-
-echo "[30/30] ShadowArch installation COMPLETE!"
-echo "Reboot & login to Hyperland."
+echo "
+==================================================
+   SHADOWARCH SETUP COMPLETE ✔
+==================================================
+   1. Reboot your system.
+   2. At the login screen, select 'Hyprland'.
+   3. Press SUPER + RETURN to open terminal.
+   4. Press SUPER + F1 for help.
+==================================================
+"

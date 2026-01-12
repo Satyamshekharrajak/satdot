@@ -2,10 +2,10 @@
 set -e
 
 # ==============================================================================
-# 0. SAFETY CHECK & ENVIRONMENT
+# 0. SAFETY CHECK
 # ==============================================================================
 if [ "$EUID" -ne 0 ]; then 
-  echo "ERROR: Please run with sudo."
+  echo "ERROR: Run using sudo."
   exit 1
 fi
 
@@ -15,28 +15,29 @@ CONFIG_DIR="$USER_HOME/.config"
 
 echo "
 ==================================================
-   SHADOWARCH MASTER SETUP (VERSION 3.0)
+        SHADOWARCH — FINAL SETUP v4.0
 ==================================================
 "
 
 # ==============================================================================
-# 1. SYSTEM OPTIMIZATION & CORE
+# 1. SYSTEM PREP
 # ==============================================================================
-echo "[1/12] Optimizing pacman and system update..."
-sed -i 's/^#ParallelDownloads/ParallelDownloads/' /etc/pacman.conf
+echo "[1/25] Updating system and enabling parallel downloads..."
+sed -i 's/^#ParallelDownloads/ParallelDownloads = 10/' /etc/pacman.conf
 pacman -Syu --noconfirm
 
-echo "[2/12] Installing core system packages..."
+echo "[2/25] Installing core packages..."
 pacman -S --noconfirm \
-    base-devel git wget curl jq chafa fastfetch \
-    networkmanager systemd-resolved dbus \
-    xdg-user-dirs xdg-utils polkit-gnome \
-    pipewire pipewire-pulse wireplumber alsa-utils \
+    base-devel git wget curl jq fastfetch chafa \
+    networkmanager systemd-resolved dbus polkit-gnome \
+    xdg-user-dirs xdg-utils \
+    linux linux-headers \
     ufw apparmor zram-generator tlp \
+    pipewire pipewire-pulse wireplumber pipewire-alsa alsa-utils \
     ttf-jetbrains-mono-nerd noto-fonts noto-fonts-cjk noto-fonts-emoji \
-    linux linux-headers qt5-wayland qt6-wayland sddm
+    qt5-wayland qt6-wayland \
+    sddm
 
-# Enable Essential Services
 systemctl enable --now NetworkManager systemd-resolved apparmor tlp sddm
 systemctl enable ufw
 ufw default deny incoming
@@ -48,7 +49,7 @@ sudo -u "$REAL_USER" xdg-user-dirs-update
 # ==============================================================================
 # 2. AUR HELPER (PARU)
 # ==============================================================================
-echo "[3/12] Installing PARU (AUR helper)..."
+echo "[3/25] Installing PARU..."
 if ! sudo -u "$REAL_USER" command -v paru &>/dev/null; then
     TMP=$(mktemp -d)
     chown "$REAL_USER":"$REAL_USER" "$TMP"
@@ -61,142 +62,231 @@ EOF
 fi
 
 # ==============================================================================
-# 3. HYPRLAND & VISUAL STACK
+# 3. HYPERLAND + WAYLAND STACK
 # ==============================================================================
-echo "[4/12] Installing Hyprland stack & Themes..."
+echo "[4/25] Installing Hyprland stack..."
 sudo -u "$REAL_USER" paru -S --noconfirm \
     hyprland waybar hyprpaper \
     wl-clipboard cliphist dunst grim slurp \
     rofi-wayland thunar kitty \
     papirus-icon-theme bibata-cursor-theme \
-    xdg-desktop-portal xdg-desktop-portal-hyprland \
-    brave-bin catppuccin-gtk-theme-mocha
+    catppuccin-gtk-theme-mocha \
+    xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
+    brave-bin firefox
 
 # ==============================================================================
-# 4. CONFIGURATION & DIRECTORIES
+# 4. DIRECTORIES & WALLPAPERS
 # ==============================================================================
-echo "[5/12] Setting up directories and wallpapers..."
-sudo -u "$REAL_USER" mkdir -p "$CONFIG_DIR"/{hypr/scripts,waybar,kitty,rofi,wallpapers/fullpack}
+echo "[5/25] Creating directories + downloading wallpapers..."
+sudo -u "$REAL_USER" mkdir -p "$CONFIG_DIR"/{hypr/scripts,waybar,kitty,rofi,dunst,wallpapers/fullpack}
 
 WALLDIR="$CONFIG_DIR/wallpapers/fullpack"
 urls=(
 "https://raw.githubusercontent.com/sylveonlol/wallpapers/main/cyberpunk-anime/cyber-anime1.png"
-"https://raw.githubusercontent.com/sylveonlol/wallpapers/main/cyberpunk-anime/cyber-anime3.png"
+"https://raw.githubusercontent.com/sylveonlol/wallpapers/main/cyberpunk-anime/cyber-anime2.jpg"
+"https://raw.githubusercontent.com/sylveonlol/wallpapers/main/cyberpunk-anime/cyber-anime4.jpg"
 "https://raw.githubusercontent.com/catppuccin/wallpapers/main/simple/mocha-wave.png"
+"https://raw.githubusercontent.com/catppuccin/wallpapers/main/simple/mocha-grid.png"
 )
 
 for url in "${urls[@]}"; do
-    sudo -u "$REAL_USER" wget -q "$url" -P "$WALLDIR" || true
+    sudo -u "$REAL_USER" wget -q "$url" -P "$WALLDIR"
 done
 
-DEFAULT_WALL=$(ls "$WALLDIR" | head -n 1)
-EXT="${DEFAULT_WALL##*.}"
+DEFAULT_WALL=$(ls "$WALLDIR" | shuf -n 1)
 
 # ==============================================================================
-# 5. WRITING THEME & CONFIG FILES
+# 5. WAYBAR CONFIG (HYDE STYLE)
 # ==============================================================================
-echo "[6/12] Configuring Terminal & Launcher..."
-
-# Kitty Config
-sudo -u "$REAL_USER" tee "$CONFIG_DIR/kitty/kitty.conf" >/dev/null <<EOF
-font_family      JetBrainsMono Nerd Font
-font_size        11.0
-window_padding_width 15
-background       #1e1e2e
-foreground       #cdd6f4
+echo "[6/25] Configuring Waybar..."
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/waybar/colors.css" >/dev/null <<EOF
+@define-color bg #1e1e2e;
+@define-color fg #cdd6f4;
+@define-color accent #89dceb;
 EOF
 
-# Rofi Config (Mocha Theme)
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/waybar/style.css" >/dev/null <<EOF
+@import "colors.css";
+* { font-family: "JetBrainsMono Nerd Font"; font-size: 14px; }
+window#waybar { background: rgba(30,30,46,0.6); backdrop-filter: blur(8px); }
+#workspaces button.active { color: @accent; }
+#cpu,#memory,#clock,#pulseaudio {
+  background: rgba(49,50,68,0.6); 
+  padding: 0 12px; 
+  margin: 4px;
+  border-radius: 12px;
+}
+EOF
+
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/waybar/config" >/dev/null <<EOF
+{
+  "layer": "top",
+  "modules-left": ["hyprland/workspaces"],
+  "modules-center": ["clock"],
+  "modules-right": ["cpu","memory","pulseaudio"],
+  "clock": { "format": "{:%H:%M:%S}" },
+  "hyprland/workspaces": {
+    "format": "{icon}",
+    "format-icons": {
+        "1": "イチ","2": "ニ","3": "サン","4": "ヨン","5": "ゴ",
+        "6": "ロク","7": "ナナ","8": "ハチ","9": "キュウ","10":"ジュウ"
+    },
+    "persistent-workspaces": {"*": 10}
+  }
+}
+EOF
+
+# ==============================================================================
+# 6. DUNST CONFIG
+# ==============================================================================
+echo "[7/25] Writing Dunst config..."
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/dunst/dunstrc" >/dev/null <<EOF
+[global]
+font = JetBrainsMono Nerd Font 12
+frame_color = "#89dceb"
+separator_color = frame
+background = "#1e1e2e"
+foreground = "#cdd6f4"
+EOF
+
+# ==============================================================================
+# 7. KITTY CONFIG
+# ==============================================================================
+echo "[8/25] Configuring Kitty..."
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/kitty/kitty.conf" >/dev/null <<EOF
+font_family JetBrainsMono Nerd Font
+font_size 12
+background #1e1e2e
+foreground #cdd6f4
+cursor #89dceb
+EOF
+
+# ==============================================================================
+# 8. ROFI CONFIG
+# ==============================================================================
+echo "[9/25] Configuring Rofi..."
 sudo -u "$REAL_USER" tee "$CONFIG_DIR/rofi/config.rasi" >/dev/null <<EOF
-configuration { modi: "drun"; show-icons: true; font: "JetBrainsMono Nerd Font 12"; }
+configuration {
+  show-icons: true;
+  font: "JetBrainsMono Nerd Font 13";
+}
 @theme "/dev/null"
 * { bg: #1e1e2e; fg: #cdd6f4; accent: #89dceb; }
-window { background-color: @bg; border: 2px; border-color: @accent; border-radius: 12px; width: 30%; }
-element selected { background-color: @accent; text-color: @bg; }
+window { background-color: @bg; border-radius: 12px; border: 2px solid @accent; }
 EOF
 
-# Hyprland Config
-echo "[7/12] Configuring Hyprland..."
-sudo -u "$REAL_USER" tee "$CONFIG_DIR/hypr/hyprland.conf" >/dev/null <<EOF
-monitor=,preferred,auto,1
-env = XCURSOR_SIZE,24
-env = QT_QPA_PLATFORM,wayland
-env = GDK_BACKEND,wayland,x11
+# ==============================================================================
+# 9. HYPRLAND CONFIG (HYDE FULL)
+# ==============================================================================
+echo "[10/25] Writing Hyprland config..."
 
-exec-once = waybar
-exec-once = hyprpaper
-exec-once = /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/hypr/hyprland.conf" >/dev/null <<EOF
+source = ~/.config/hypr/colors.conf
+
+monitor=,preferred,auto,1
+
+env = XCURSOR_SIZE=24
+env = QT_QPA_PLATFORM=wayland
+env = GDK_BACKEND=wayland
+
+exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+exec-once = /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 &
+exec-once = hyprpaper &
+exec-once = waybar &
+
+general {
+    gaps_in = 10
+    gaps_out = 20
+    border_size = 3
+    col.active_border = rgb(89dceb)
+    col.inactive_border = rgb(313244)
+}
+
+decoration {
+    rounding = 10
+    blur {
+        enabled = true
+        size = 6
+        passes = 2
+    }
+    shadow_range = 20
+    drop_shadow = true
+}
+
+animations {
+    enabled = true
+    animation = windows,1,7,default
+    animation = fade,1,4,default
+    animation = border,1,3,default
+}
 
 \$mod = SUPER
+
 bind = \$mod, RETURN, exec, kitty
-bind = \$mod, D, exec, rofi -show drun -theme $CONFIG_DIR/rofi/config.rasi
 bind = \$mod, Q, killactive
-bind = \$mod, F1, exec, $CONFIG_DIR/hypr/scripts/keybinds.sh
-bind = \$mod SHIFT, W, exec, $USER_HOME/shadow-wallpaper.sh \$(find $WALLDIR -type f | shuf -n 1)
+bind = \$mod, D, exec, rofi -show drun
+EOF
 
-$(for i in {1..9}; do echo "bind = \$mod, $i, workspace, $i"; done)
-bind = \$mod, 0, workspace, 10
+# Add Workspace Binds
+for i in {1..9}; do 
+  echo "bind = \$mod, $i, workspace, $i" | sudo -u "$REAL_USER" tee -a "$CONFIG_DIR/hypr/hyprland.conf" >/dev/null
+done
+echo "bind = \$mod, 0, workspace, 10" | sudo -u "$REAL_USER" tee -a "$CONFIG_DIR/hypr/hyprland.conf" >/dev/null
+
+# ==============================================================================
+# 10. HYPREPAPER CONFIG
+# ==============================================================================
+echo "[11/25] Writing Hyprpaper config..."
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/hypr/hyprpaper.conf" >/dev/null <<EOF
+preload = $WALLDIR/$DEFAULT_WALL
+wallpaper = ,$WALLDIR/$DEFAULT_WALL
 EOF
 
 # ==============================================================================
-# 6. SCRIPTS & MAINTENANCE
+# 11. ASCII ANIME FETCH SCRIPT
 # ==============================================================================
-echo "[8/12] Generating helper scripts..."
-
-# Keybinds script
-sudo -u "$REAL_USER" tee "$CONFIG_DIR/hypr/scripts/keybinds.sh" >/dev/null <<'EOF'
+echo "[12/25] Installing anime fetch..."
+sudo -u "$REAL_USER" tee "$CONFIG_DIR/hypr/scripts/anime-fetch.sh" >/dev/null <<'EOF'
 #!/usr/bin/env bash
-grep '^bind =' ~/.config/hypr/hyprland.conf | sed 's/bind = //g' | rofi -dmenu -i -p "Keys" -theme ~/.config/rofi/config.rasi
+DIR="$HOME/.config/wallpapers/fullpack"
+IMG=$(find "$DIR" -type f | shuf -n 1)
+fastfetch --logo "$IMG" --logo-type kitty --logo-width 28 --logo-height 12
 EOF
+chmod +x "$CONFIG_DIR/hypr/scripts/anime-fetch.sh"
 
-# Wallpaper script
-sudo -u "$REAL_USER" tee "$USER_HOME/shadow-wallpaper.sh" >/dev/null <<EOF
-#!/usr/bin/env bash
-NEW_WALL=\$1
-hyprctl hyprpaper preload "\$NEW_WALL"
-hyprctl hyprpaper wallpaper ",\$NEW_WALL"
-EOF
-
-chmod +x "$CONFIG_DIR/hypr/scripts/keybinds.sh" "$USER_HOME/shadow-wallpaper.sh"
+echo "~/.config/hypr/scripts/anime-fetch.sh" >> "$USER_HOME/.bashrc"
 
 # ==============================================================================
-# 7. SDDM & SHELL POLISH
+# 12. SDDM THEME (CATPPUCCIN + ANIME)
 # ==============================================================================
-echo "[9/12] Setting up SDDM Login Screen..."
+echo "[13/25] Installing SDDM theme..."
 THEMEDIR="/usr/share/sddm/themes/ShadowArch"
 mkdir -p "$THEMEDIR"
-cp "$WALLDIR/$DEFAULT_WALL" "$THEMEDIR/background.$EXT"
-echo "[General]
-background=background.$EXT
+
+cp "$WALLDIR/$DEFAULT_WALL" "$THEMEDIR/background.png"
+
+sudo tee "$THEMEDIR/theme.conf" >/dev/null <<EOF
+[General]
+background=background.png
 font=JetBrains Mono
-accentColor=#89dceb" > "$THEMEDIR/theme.conf"
+accentColor=#89dceb
+EOF
 
-mkdir -p /etc/sddm.conf.d
-echo "[Theme]
-Current=ShadowArch" > /etc/sddm.conf.d/theme.conf
-
-# Bashrc Fetch
-if ! grep -q "fastfetch" "$USER_HOME/.bashrc"; then
-    echo "fastfetch --logo-type kitty --logo-width 28" >> "$USER_HOME/.bashrc"
-fi
-
-# Hyprpaper startup file
-sudo -u "$REAL_USER" echo "preload = $WALLDIR/$DEFAULT_WALL
-wallpaper = ,$WALLDIR/$DEFAULT_WALL" > "$CONFIG_DIR/hypr/hyprpaper.conf"
+sudo tee /etc/sddm.conf.d/theme.conf >/dev/null <<EOF
+[Theme]
+Current=ShadowArch
+EOF
 
 # ==============================================================================
-# 8. PERMISSIONS & FINISH
+# 13. PERMISSIONS
 # ==============================================================================
-echo "[10/12] Fixing ownership..."
+echo "[14/25] Fixing permissions..."
 chown -R "$REAL_USER":"$REAL_USER" "$USER_HOME"
 
 echo "
 ==================================================
-   SHADOWARCH SETUP COMPLETE ✔
+      SHADOWARCH INSTALL COMPLETE v4.0 ✔
 ==================================================
-   1. Reboot your system.
-   2. At the login screen, select 'Hyprland'.
-   3. Press SUPER + RETURN to open terminal.
-   4. Press SUPER + F1 for help.
+ Reboot → Login → Choose “Hyprland”
 ==================================================
 "
